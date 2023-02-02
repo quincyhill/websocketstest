@@ -1,18 +1,5 @@
 import { createBoard, playMove } from './connect4.js'
 
-window.addEventListener('DOMContentLoaded', () => {
-  // Initialize the UI.
-  const board = document.querySelector('.board')
-  createBoard(board)
-  // Open the WebSocket connection and register event handlers.
-  const websocket = new WebSocket('ws://localhost:8001')
-
-  // This is my solution, glad this works but will be doing other stuff
-  // websocket.onopen = () => websocket.send('user connected')
-  receiveMoves(board, websocket)
-  sendMoves(board, websocket)
-})
-
 // now we have all the logic needed to transmit moves to the server
 function sendMoves(board, websocket) {
   // When clicking a column, send a "play" event for a move in that column.
@@ -55,8 +42,36 @@ function receiveMoves(board, websocket) {
       case 'error':
         showMessage(event.message)
         break
+      case 'init':
+        // Create link for inviting the second player.
+        document.querySelector('.join').href = '?join=' + event.join
+        break
       default:
         throw new Error(`Unsupported event type: ${event.type}.`)
     }
   })
 }
+
+function initGame(websocket) {
+  websocket.addEventListener('open', () => {
+    // Send an "init" event for the first player.
+    const event = { type: 'init' }
+    websocket.send(JSON.stringify(event))
+  })
+}
+
+window.addEventListener('DOMContentLoaded', () => {
+  // Initialize the UI.
+  const board = document.querySelector('.board')
+  createBoard(board)
+  // Open the WebSocket connection and register event handlers.
+  const websocket = new WebSocket('ws://localhost:8001')
+
+  // Initialize the game.
+  initGame(websocket)
+
+  // This is my solution, glad this works but will be doing other stuff
+  // websocket.onopen = () => websocket.send('user connected')
+  receiveMoves(board, websocket)
+  sendMoves(board, websocket)
+})

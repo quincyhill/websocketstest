@@ -1,74 +1,49 @@
 import json
 import asyncio
+# For websockets, just import what I need since it has better intellisense
 import websockets
 import itertools
+import secrets
 from connect4 import PLAYER1, PLAYER2, Connect4
 
-async def handler(websocket):
-    # This implementation is of the websockets documentation with some of my own tweaks.
-    # Initialize a Connect Four game.
+JOIN = {}
+
+
+async def start(websocket):
+    # Initialize a Connect Four game, the set of WebSocket connections
+    # receiving moves from this game, and secret access token.
     game = Connect4()
+    connected = {websocket}
 
-    # Players take alternate turns, using the same browser.
+    join_key = secrets.token_urlsafe(12)
+    JOIN[join_key] = game, connected
 
-    # Interesting use of itertools, should read more into the library...
-    turns = itertools.cycle([PLAYER1, PLAYER2])
-    player = next(turns)
-
-    async for message in websocket:
-        # Valid in types
-        # {type: 'play', column : INT}
-
-        # Parse a "play" event from the client
-        event = json.loads(message)
-
-        # Ensure the input data is valid
-        assert event['type'] == 'play'
-        assert isinstance(event['column'], int)
-
-        # Now this should also be an int
-        column = event['column']
-
-        # Valid out types
-        # {type: "play", player: PLAYER, column: INT, row: INT}
-        # {type: "win", player: PLAYER}
-        # {type: "error", "message": MESSAGE}
-        try:
-            # Play the move.
-            row = game.play(player, column)
-        except RuntimeError as e:
-            # Send an "error" event if the move was illegal.
-            event = {
-                "type": "error",
-                "message": str(e),
-            }
-            await websocket.send(json.dumps(event))
-
-            # Skip the rest of the loop. I keep forgetting that continue exists...
-            continue
-
-        # Send a "play" event to update client.
+    try:
+        # Send the secret access token to the browser of the first player,
+        # where it'll be used for building a "join" link.
         event = {
-            "type": "play",
-            "player": player,
-            "column": column,
-            "row": row,
+            "type": "init",
+            "join": join_key,
         }
-
         await websocket.send(json.dumps(event))
 
-        # If move is winning, send a "win" event to update client.
-        if game.winner is not None:
-            event = {
-                "type": "win",
-                "player": game.winner,
-            }
-            await websocket.send(json.dumps(event))
-        
-        # Alternate turns.
-        player = next(turns)
+        # Temporary - for testing.
+        print("first player started game", id(game))
+        async for message in websocket:
+            print("first player sent", message)
+
+    finally:
+        del JOIN[join_key]
 
 
+async def handler(websocket):
+    # Receive and parse the "init" event from the UI.
+    message = await websocket.recv()
+    event = json.loads(message)
+    assert event["type"] == "init"
+
+    # First player starts a new game.
+    await start(websocket)
 
 async def main():
     PORT = 8001
