@@ -6,10 +6,38 @@ import itertools
 import secrets
 from connect4 import PLAYER1, PLAYER2, Connect4
 
+# Could define the types but this will still work
 JOIN = {}
 
+async def error(websocket, message):
+    """Send an error message to a WebSocket connection."""
+    event = {
+        "type": "error",
+        "message": message,
+    }
+    await websocket.send(json.dumps(event))
+
+async def join(websocket, join_key):
+    # Find the Connect Four game.
+    try:
+        game, connected = JOIN[join_key]
+    except KeyError:
+        await error(websocket, "Invalid join key.")
+        return
+
+    # Register to receive moves from this game.
+    connected.add(websocket)
+    try:
+        # Temporary - for testing.
+        print("second player joined game", id(game))
+        async for message in websocket:
+            print("second player sent", message)
+    finally:
+        # Unregister to stop receiving moves from this game.
+        connected.remove(websocket)
 
 async def start(websocket):
+    """Start a new game."""
     # Initialize a Connect Four game, the set of WebSocket connections
     # receiving moves from this game, and secret access token.
     game = Connect4()
@@ -37,15 +65,21 @@ async def start(websocket):
 
 
 async def handler(websocket):
+    """Handle a WebSocket connection."""
     # Receive and parse the "init" event from the UI.
     message = await websocket.recv()
     event = json.loads(message)
     assert event["type"] == "init"
 
-    # First player starts a new game.
-    await start(websocket)
+    if "join" in event:
+        # Second player joins an existing game.
+        await join(websocket, event["join"])
+    else:
+        # First player starts a new game.
+        await start(websocket)
 
 async def main():
+    """Start the server."""
     PORT = 8001
     async with websockets.serve(ws_handler=handler, host="", port=PORT):
         print(f"Server started on port {PORT}")

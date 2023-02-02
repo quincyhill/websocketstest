@@ -30,6 +30,10 @@ function receiveMoves(board, websocket) {
   websocket.addEventListener('message', ({ data }) => {
     const event = JSON.parse(data)
     switch (event.type) {
+      case 'init':
+        // Create link for inviting the second player.
+        document.querySelector('.join').href = '?join=' + event.join
+        break
       case 'play':
         // Update the UI with the move.
         playMove(board, event.player, event.column, event.row)
@@ -42,10 +46,6 @@ function receiveMoves(board, websocket) {
       case 'error':
         showMessage(event.message)
         break
-      case 'init':
-        // Create link for inviting the second player.
-        document.querySelector('.join').href = '?join=' + event.join
-        break
       default:
         throw new Error(`Unsupported event type: ${event.type}.`)
     }
@@ -55,7 +55,14 @@ function receiveMoves(board, websocket) {
 function initGame(websocket) {
   websocket.addEventListener('open', () => {
     // Send an "init" event for the first player.
-    const event = { type: 'init' }
+    const params = new URLSearchParams(window.location.search)
+    let event = { type: 'init' }
+    if (params.has('join')) {
+      // Second player joins an existing game.
+      event.join = params.get('join')
+    } else {
+      // First player starts a new game.
+    }
     websocket.send(JSON.stringify(event))
   })
 }
