@@ -3,6 +3,14 @@ import { createBoard, playMove } from './connect4.js'
 // now we have all the logic needed to transmit moves to the server
 function sendMoves(board, websocket) {
   // When clicking a column, send a "play" event for a move in that column.
+
+  // This ensures when this function is called there is no ability to have the event listener called to performn a move
+  // Will check out more docs with this
+  const params = new URLSearchParams(window.location.search)
+  if (params.has('watch')) {
+    return
+  }
+
   board.addEventListener('click', ({ target }) => {
     const column = target.dataset.column
     // Ignore clicks outside a column
@@ -33,6 +41,8 @@ function receiveMoves(board, websocket) {
       case 'init':
         // Create link for inviting the second player.
         document.querySelector('.join').href = '?join=' + event.join
+        // Create a link for watching the game.
+        document.querySelector('.watch').href = '?watch=' + event.watch
         break
       case 'play':
         // Update the UI with the move.
@@ -60,6 +70,9 @@ function initGame(websocket) {
     if (params.has('join')) {
       // Second player joins an existing game.
       event.join = params.get('join')
+    } else if (params.has('watch')) {
+      // Watcher joins an existing game.
+      event.watch = params.get('watch')
     } else {
       // First player starts a new game.
     }
@@ -76,9 +89,6 @@ window.addEventListener('DOMContentLoaded', () => {
 
   // Initialize the game.
   initGame(websocket)
-
-  // This is my solution, glad this works but will be doing other stuff
-  // websocket.onopen = () => websocket.send('user connected')
   receiveMoves(board, websocket)
   sendMoves(board, websocket)
 })

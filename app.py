@@ -10,6 +10,7 @@ logging.basicConfig(format='%(message)s', level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 JOIN = {}
+WATCH = {}
 
 async def error(websocket, message):
     """Send an outbound error message to a WebSocket connection."""
@@ -19,11 +20,48 @@ async def error(websocket, message):
     }
     await websocket.send(json.dumps(event))
 
+async def replay(websocket, game):
+    """Send previous moves"""
+    # Make a copy to avoid an exception if game.loves change while iteration
+    # is in progress. If a move is played while replay is running, moves will
+    # be sent ouf of order but each move will be sent once and eventually the
+    # UI will be consistent.
+    for player, column, row in game.moves.copy():
+        event = {
+            "type": "play",
+            "player": player,
+            "column": column,
+            "row": row,
+        }
+        await websocket.send(json.dumps(event))
+
+async def watch(websocket, watch_key):
+    """Watch a game of Connect Four."""
+
+    # Find the Connect Four game.
+    try:
+        game, connected = WATCH[watch_key]
+    except KeyError:
+        await error(websocket, "Invalid watch key.")
+        return
+
+    # Register to receive moves from this game.
+    connected.add(websocket)
+    try:
+        # Send previous moves, in case the game already started
+        await replay(websocket, game)
+
+        # Keep the connection open, but don't receive any messages.
+        await websocket.wait_closed()
+    finally:
+        # Unregister to stop receiving moves from this game.
+        connected.remove(websocket)
+
 async def play(websocket, game: Connect4, player, connected):
-    """Play a game of Connect Four."""
+    """Recieve and process moves from a player"""
 
     async for message in websocket:
-        # Parse our event
+        # Parse our "play" event from the UI.
         event = json.loads(message)
         assert event["type"] == "play"
         column = event["column"]
@@ -44,8 +82,8 @@ async def play(websocket, game: Connect4, player, connected):
             "row": row,
         }
 
-        # Remember that connected is a set of websockets so I just need to send the event to all of them.
-        await asyncio.wait([ws.send(json.dumps(event)) for ws in connected])
+        # This is the other way instead of doing the loops
+        websockets.broadcast(connected, json.dumps(event))
 
         # If move is winning, send a "win" event to all clients.
         if game.winner is not None:
@@ -53,7 +91,8 @@ async def play(websocket, game: Connect4, player, connected):
                 "type": "win",
                 "player": player,
             }
-            await asyncio.wait([ws.send(json.dumps(event)) for ws in connected])
+            # Same change here
+            websockets.broadcast(connected, json.dumps(event))
         
 
 async def join(websocket, join_key):
@@ -68,7 +107,10 @@ async def join(websocket, join_key):
     # Register to receive moves from this game.
     connected.add(websocket)
     try:
-        # here we run play as well
+        # Send the frist move, in case the first player already played it
+        await replay(websocket, game)
+
+        # Receive and process moves from the second player.
         await play(websocket, game, PLAYER2, connected)
     finally:
         # Unregister to stop receiving moves from this game.
@@ -86,12 +128,17 @@ async def start(websocket):
     join_key = secrets.token_urlsafe(12)
     JOIN[join_key] = game, connected
 
+    # Different key from the game
+    watch_key = secrets.token_urlsafe(12)
+    WATCH[watch_key] = game, connected
+
     try:
         # Send the secret access token to the browser of the first player,
         # where it'll be used for building a "join" link.
         event = {
             "type": "init",
             "join": join_key,
+            "watch": watch_key,
         }
         await websocket.send(json.dumps(event))
 
@@ -100,6 +147,8 @@ async def start(websocket):
 
     finally:
         del JOIN[join_key]
+        # Hm...
+        del WATCH[watch_key]
 
 
 async def handler(websocket):
@@ -112,6 +161,9 @@ async def handler(websocket):
     if "join" in event:
         # Second player joins an existing game.
         await join(websocket, event["join"])
+    elif "watch" in event:
+        # Watch an existing game.
+        await watch(websocket, event["watch"])
     else:
         # First player starts a new game.
         await start(websocket)
