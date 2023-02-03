@@ -1,18 +1,23 @@
 import json
 import asyncio
 # For websockets, just import what I need since it has better intellisense
-import websockets
+from websockets import server 
+from websockets.legacy.protocol import broadcast
+
 import secrets
 from connect4 import PLAYER1, PLAYER2, Connect4
 import logging
 logging.basicConfig(format='%(message)s', level=logging.DEBUG)
+from typing import Dict, Set, Literal, Tuple, Type
 
 logger = logging.getLogger(__name__)
 
-JOIN = {}
-WATCH = {}
+# Fixed
+JOIN: Dict[str, Tuple[Connect4, Set[server.ServerConnection]]] = {}
+WATCH: Dict[str, Tuple[Connect4, Set[server.ServerConnection]]] = {}
 
-async def error(websocket, message):
+
+async def error(websocket: server.WebSocketServerProtocol, message: str) -> None:
     """Send an outbound error message to a WebSocket connection."""
     event = {
         "type": "error",
@@ -20,7 +25,7 @@ async def error(websocket, message):
     }
     await websocket.send(json.dumps(event))
 
-async def replay(websocket, game):
+async def replay(websocket: server.WebSocketServerProtocol, game: Connect4) -> None:
     """Send previous moves"""
     # Make a copy to avoid an exception if game.loves change while iteration
     # is in progress. If a move is played while replay is running, moves will
@@ -35,7 +40,7 @@ async def replay(websocket, game):
         }
         await websocket.send(json.dumps(event))
 
-async def watch(websocket, watch_key):
+async def watch(websocket: server.WebSocketServerProtocol, watch_key: str) -> None:
     """Watch a game of Connect Four."""
 
     # Find the Connect Four game.
@@ -57,7 +62,7 @@ async def watch(websocket, watch_key):
         # Unregister to stop receiving moves from this game.
         connected.remove(websocket)
 
-async def play(websocket, game: Connect4, player, connected):
+async def play(websocket: server.WebSocketServerProtocol, game: Connect4, player: Literal['red', 'yellow'], connected: Set[server.WebSocketServerProtocol]) -> None:
     """Recieve and process moves from a player"""
 
     async for message in websocket:
@@ -83,7 +88,7 @@ async def play(websocket, game: Connect4, player, connected):
         }
 
         # This is the other way instead of doing the loops
-        websockets.broadcast(connected, json.dumps(event))
+        broadcast(connected, json.dumps(event))
 
         # If move is winning, send a "win" event to all clients.
         if game.winner is not None:
@@ -92,10 +97,10 @@ async def play(websocket, game: Connect4, player, connected):
                 "player": player,
             }
             # Same change here
-            websockets.broadcast(connected, json.dumps(event))
+            broadcast(connected, json.dumps(event))
         
 
-async def join(websocket, join_key):
+async def join(websocket: server.WebSocketServerProtocol, join_key: str) -> None:
     # Find the Connect Four game.
     # Somewhere in the function the play function is called.
     try:
@@ -110,22 +115,24 @@ async def join(websocket, join_key):
         # Send the frist move, in case the first player already played it
         await replay(websocket, game)
 
-        # Receive and process moves from the second player.
+        # Receive and process moves from the second player
         await play(websocket, game, PLAYER2, connected)
     finally:
         # Unregister to stop receiving moves from this game.
         connected.remove(websocket)
 
-async def start(websocket):
+async def start(websocket: server.WebSocketServerProtocol) -> None:
     """Start a new game."""
     # Initialize a Connect Four game, the set of WebSocket connections
     # receiving moves from this game, and secret access token.
     game = Connect4()
 
     # The connected received the websocket connection of the first player.
-    connected = {websocket}
+    connected: Set[server.WebSocketServerProtocol] = {websocket}
 
     join_key = secrets.token_urlsafe(12)
+
+    # add this tuple
     JOIN[join_key] = game, connected
 
     # Different key from the game
@@ -151,7 +158,7 @@ async def start(websocket):
         del WATCH[watch_key]
 
 
-async def handler(websocket):
+async def handler(websocket: server.WebSocketServerProtocol) -> None:
     """Handle a WebSocket connection."""
     # Receive and parse the "init" event from the UI.
     message = await websocket.recv()
@@ -171,7 +178,7 @@ async def handler(websocket):
 async def main():
     """Start the server."""
     PORT = 8001
-    async with websockets.serve(ws_handler=handler, host="", port=PORT):
+    async with server.serve(ws_handler=handler, host="", port=PORT):
         logger.debug('Server started on port %d', PORT)
         await asyncio.Future() # Runs forever
 
